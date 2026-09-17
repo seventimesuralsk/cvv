@@ -1,0 +1,275 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Seven Times — Заявки кандидатов</title>
+<style>
+:root{
+  --bg:#fbfbfd; --surface:#ffffff; --text:#1d1d1f; --muted:#86868b; --line:#e5e5e7;
+  --accent:#7a1f2e; --accent-soft:#7a1f2e14; --good:#1a7d3c; --warn:#b8860b; --bad:#c23616;
+}
+*{box-sizing:border-box;}
+html,body{margin:0;padding:0;}
+body{
+  font-family:-apple-system,BlinkMacSystemFont,"SF Pro Text","Segoe UI",Roboto,sans-serif;
+  background:var(--bg); color:var(--text); min-height:100vh; -webkit-font-smoothing:antialiased;
+}
+.topbar{
+  padding:16px 20px; display:flex; align-items:center; gap:16px;
+  border-bottom:1px solid var(--line);
+}
+.brand{font-weight:600; font-size:15px; letter-spacing:-.01em;}
+input[type=text]{
+  font-size:16px; padding:12px 14px; border-radius:10px; border:1.5px solid var(--line);
+  background:var(--surface); color:var(--text); outline:none; font-family:inherit; width:100%;
+}
+input[type=text]:focus{ border-color:var(--accent); }
+.btn{
+  padding:12px 20px; border-radius:10px; border:none; cursor:pointer;
+  font-size:15px; font-weight:600; font-family:inherit;
+}
+.btn-primary{ background:var(--accent); color:#fff; }
+.btn-primary:disabled{ background:#d1d1d6; cursor:not-allowed; }
+.btn-ghost{ background:transparent; color:var(--text); border:1.5px solid var(--line); }
+.gate{ max-width:360px; margin:100px auto; text-align:center; padding:0 20px; }
+.gate h2{ font-size:22px; margin-bottom:8px; }
+.gate p{ color:var(--muted); font-size:14px; margin-bottom:20px; }
+.gate input{ text-align:center; margin-bottom:14px; }
+.err{ color:var(--bad); font-size:13px; margin-top:10px; display:none; }
+.err.show{ display:block; }
+.admin-wrap{ max-width:1100px; margin:0 auto; padding:28px 20px 80px; display:none; }
+.admin-wrap.show{ display:block; }
+.admin-top{ display:flex; align-items:center; justify-content:space-between; margin-bottom:26px; flex-wrap:wrap; gap:14px; }
+.admin-title{ font-size:26px; font-weight:700; letter-spacing:-.02em; }
+.admin-sub{ color:var(--muted); font-size:14px; margin-top:4px; }
+.stats-row{ display:grid; grid-template-columns:repeat(auto-fit,minmax(140px,1fr)); gap:14px; margin-bottom:26px; }
+.stat-card{ background:var(--surface); border:1px solid var(--line); border-radius:14px; padding:18px 20px; }
+.stat-card .n{ font-size:24px; font-weight:700; letter-spacing:-.02em; }
+.stat-card .l{ font-size:13px; color:var(--muted); margin-top:2px; }
+.filters{ display:flex; gap:10px; flex-wrap:wrap; margin-bottom:18px; }
+.fchip{ padding:8px 14px; border-radius:999px; border:1.5px solid var(--line); background:var(--surface); font-size:13px; font-weight:600; cursor:pointer; color:var(--muted); }
+.fchip.active{ background:var(--text); color:#fff; border-color:var(--text); }
+.table-wrap{ background:var(--surface); border:1px solid var(--line); border-radius:16px; overflow:hidden; overflow-x:auto; }
+table{ width:100%; border-collapse:collapse; font-size:14px; min-width:800px; }
+th{ text-align:left; padding:13px 15px; color:var(--muted); font-weight:600; font-size:12px; text-transform:uppercase; letter-spacing:.03em; border-bottom:1px solid var(--line); background:#fafafa; }
+td{ padding:13px 15px; border-bottom:1px solid var(--line); vertical-align:top; }
+tr:last-child td{ border-bottom:none; }
+tr.row-detail{ cursor:pointer; }
+tr.row-detail:hover{ background:#fafafa; }
+.score-badge{ display:inline-block; padding:4px 10px; border-radius:999px; font-weight:700; font-size:12px; white-space:nowrap; }
+.score-good{ background:#1a7d3c1a; color:var(--good); }
+.score-warn{ background:#b8860b1a; color:var(--warn); }
+.score-bad{ background:#c236161a; color:var(--bad); }
+.detail-row{ display:none; background:#fafafa; }
+.detail-row.open{ display:table-row; }
+.detail-grid{ display:grid; grid-template-columns:1fr 1fr; gap:10px 24px; padding:6px 0; }
+.detail-grid .k{ color:var(--muted); font-size:12px; }
+.detail-grid .v{ font-size:14px; margin-top:2px; }
+.empty{ text-align:center; padding:60px 20px; color:var(--muted); }
+.loading{ text-align:center; padding:60px 20px; color:var(--muted); }
+</style>
+</head>
+<body>
+
+<div class="topbar">
+  <div class="brand">Seven Times · HR</div>
+</div>
+
+<div class="gate" id="adminGate">
+  <h2>Доступ к анкетам</h2>
+  <p>Введите пароль отдела кадров</p>
+  <input type="text" id="adminPass" placeholder="Пароль">
+  <button class="btn btn-primary" style="width:100%;" onclick="adminLogin()">Войти</button>
+  <div class="err" id="adminErr">Неверный пароль</div>
+</div>
+
+<div class="admin-wrap" id="adminPanel">
+  <div class="admin-top">
+    <div>
+      <div class="admin-title">Заявки кандидатов</div>
+      <div class="admin-sub" id="adminSub">—</div>
+      <div class="admin-sub" id="adminWho" style="color:var(--accent); font-weight:600;"></div>
+    </div>
+    <button class="btn btn-ghost" onclick="loadApplications()">Обновить</button>
+  </div>
+
+  <div class="stats-row" id="statsRow"></div>
+  <div class="filters" id="filters"></div>
+  <div class="table-wrap">
+    <table>
+      <thead>
+        <tr>
+          <th>Имя</th><th>Должность</th><th>Возраст</th><th>Опыт</th>
+          <th>Соответствие</th><th>Статус</th><th>Обработал(а)</th><th>Дата</th>
+        </tr>
+      </thead>
+      <tbody id="tbody"><tr><td colspan="8" class="loading">Загрузка…</td></tr></tbody>
+    </table>
+  </div>
+</div>
+
+<script>
+/* Вставь сюда URL деплоя того же Apps Script, что и у основного сайта меню —
+   анкеты вакансий (лист "Вакансия") пишутся именно туда */
+const SCRIPT_URL = "https://script.google.com/macros/s/AKfycbwWLSYWkpnkxNbHza6tE1IFPas3bEN5g8MhwvZ65JcQV1Z5S6tFztScCobfY8ArvD3Wxw/exec";
+
+let ALL_APPS = [];
+let ACTIVE_FILTER = 'all';
+
+function adminLogin(){
+  const pass = document.getElementById('adminPass').value;
+  if(!pass) return;
+  document.getElementById('adminErr').classList.remove('show');
+  tryLoadWithKey(pass, false);
+}
+
+async function tryLoadWithKey(key, silent){
+  const btn = document.querySelector('#adminGate button');
+  if(!silent && btn) btn.textContent = 'Проверяем…';
+  try{
+    const res = await fetch(SCRIPT_URL + '?action=hrList&key=' + encodeURIComponent(key));
+    const data = await res.json();
+    if(data.ok){
+      sessionStorage.setItem('st_hr_admin_key', key);
+      sessionStorage.setItem('st_hr_admin_name', data.adminName || '');
+      ALL_APPS = data.rows || [];
+      showAdminPanel();
+    } else {
+      sessionStorage.removeItem('st_hr_admin_key');
+      sessionStorage.removeItem('st_hr_admin_name');
+      if(!silent) document.getElementById('adminErr').classList.add('show');
+    }
+  }catch(err){
+    if(!silent) document.getElementById('adminErr').classList.add('show');
+  } finally {
+    if(btn) btn.textContent = 'Войти';
+  }
+}
+
+function showAdminPanel(){
+  document.getElementById('adminGate').style.display = 'none';
+  document.getElementById('adminPanel').classList.add('show');
+  const name = sessionStorage.getItem('st_hr_admin_name') || '';
+  document.getElementById('adminWho').textContent = name ? `Вы вошли как: ${name}` : '';
+  renderAdminStats();
+  renderFilters();
+  renderTable();
+}
+
+async function loadApplications(){
+  const key = sessionStorage.getItem('st_hr_admin_key');
+  if(!key) return;
+  document.getElementById('tbody').innerHTML = `<tr><td colspan="8" class="loading">Загрузка…</td></tr>`;
+  try{
+    const res = await fetch(SCRIPT_URL + '?action=hrList&key=' + encodeURIComponent(key));
+    const data = await res.json();
+    ALL_APPS = data.rows || [];
+    renderAdminStats();
+    renderFilters();
+    renderTable();
+  }catch(err){
+    document.getElementById('tbody').innerHTML = `<tr><td colspan="8" class="empty">Не удалось загрузить данные. Проверь SCRIPT_URL.</td></tr>`;
+  }
+}
+
+const STATUSES = ["Новая", "Позвонили", "Собеседование назначено", "Принят(а)", "Отказ"];
+
+async function updateStatus(id, newStatus, selectEl){
+  const key = sessionStorage.getItem('st_hr_admin_key');
+  const adminName = sessionStorage.getItem('st_hr_admin_name') || '';
+  selectEl.disabled = true;
+  try{
+    const res = await fetch(SCRIPT_URL, {
+      method:'POST',
+      headers:{ 'Content-Type':'text/plain' },
+      body: JSON.stringify({ action:'hrUpdateStatus', key, id, status:newStatus, adminName })
+    });
+    const data = await res.json();
+    if(data.ok){
+      const item = ALL_APPS.find(a=>a.id===id);
+      if(item){ item.status = newStatus; item.processedBy = adminName; }
+      renderTable();
+    }
+  }catch(err){
+    console.error('Не удалось обновить статус', err);
+  } finally {
+    selectEl.disabled = false;
+  }
+}
+
+function renderAdminStats(){
+  const total = ALL_APPS.length;
+  const strong = ALL_APPS.filter(a=>Number(a.score)>=70).length;
+  const avg = total ? Math.round(ALL_APPS.reduce((s,a)=>s+Number(a.score||0),0)/total) : 0;
+  document.getElementById('adminSub').textContent = `Всего заявок: ${total}`;
+  document.getElementById('statsRow').innerHTML = `
+    <div class="stat-card"><div class="n">${total}</div><div class="l">Всего заявок</div></div>
+    <div class="stat-card"><div class="n">${strong}</div><div class="l">Сильных кандидатов (70%+)</div></div>
+    <div class="stat-card"><div class="n">${avg}%</div><div class="l">Средний балл</div></div>
+  `;
+}
+
+function renderFilters(){
+  const positions = ['all', ...new Set(ALL_APPS.map(a=>a.position).filter(Boolean))];
+  document.getElementById('filters').innerHTML = positions.map(p=>`
+    <div class="fchip ${ACTIVE_FILTER===p?'active':''}" onclick="setFilter('${p.replace(/'/g,"\\'")}')">${p==='all'?'Все должности':p}</div>
+  `).join('');
+}
+
+function setFilter(p){ ACTIVE_FILTER = p; renderFilters(); renderTable(); }
+
+function scoreClass(s){ s=Number(s); return s>=70?'score-good':(s>=40?'score-warn':'score-bad'); }
+
+function renderTable(){
+  let rows = ACTIVE_FILTER==='all' ? ALL_APPS : ALL_APPS.filter(a=>a.position===ACTIVE_FILTER);
+  rows = rows.slice().sort((a,b)=>Number(b.score||0)-Number(a.score||0));
+  if(!rows.length){
+    document.getElementById('tbody').innerHTML = `<tr><td colspan="8" class="empty">Заявок пока нет</td></tr>`;
+    return;
+  }
+  document.getElementById('tbody').innerHTML = rows.map((a,i)=>`
+    <tr class="row-detail" onclick="toggleDetail(${i})">
+      <td><b>${a.name||'—'}</b>${a.ageFlag ? `<div style="margin-top:4px;"><span class="score-badge score-warn" title="${a.ageFlag}">до 18 лет</span></div>` : ''}</td>
+      <td>${a.position||'—'}</td>
+      <td>${a.age||'—'}</td>
+      <td>${a.experience||'—'}</td>
+      <td><span class="score-badge ${scoreClass(a.score)}">${a.score||0}%</span></td>
+      <td onclick="event.stopPropagation()">
+        <select onchange="updateStatus('${a.id}', this.value, this)" style="font-size:13px; padding:6px 8px; border-radius:8px; border:1.5px solid var(--line); font-family:inherit;">
+          ${STATUSES.map(s=>`<option value="${s}" ${((a.status||'Новая')===s)?'selected':''}>${s}</option>`).join('')}
+        </select>
+      </td>
+      <td>${a.processedBy || '—'}</td>
+      <td>${a.timestamp ? new Date(a.timestamp).toLocaleDateString('ru-RU') : '—'}</td>
+    </tr>
+    <tr class="detail-row" id="detail-${i}">
+      <td colspan="8">
+        <div class="detail-grid">
+          <div><div class="k">Телефон</div><div class="v">${a.phone||'—'}</div></div>
+          <div><div class="k">Ответ на вопрос по должности</div><div class="v">${a.roleAnswer||'—'}</div></div>
+          <div><div class="k">Учится</div><div class="v">${a.isStudent||'—'}</div></div>
+          <div><div class="k">Подработка параллельно</div><div class="v">${a.parallelJob||'—'}</div></div>
+          <div><div class="k">Предыдущее место работы</div><div class="v">${a.prevPlace||'—'}</div></div>
+          <div><div class="k">Причина увольнения</div><div class="v">${a.leaveReason||'—'}</div></div>
+          <div><div class="k">Удобный график</div><div class="v">${a.schedule||'—'}</div></div>
+          <div><div class="k">Предпочитаемый филиал</div><div class="v">${a.preferredBranch||'—'}</div></div>
+          <div><div class="k">Откуда узнал(а) о нас</div><div class="v">${a.howFound||'—'}</div></div>
+          <div><div class="k">Почему хочет работать у нас</div><div class="v">${a.whyWorkHere||'—'}</div></div>
+          ${a.ageFlag ? `<div><div class="k">Возрастное ограничение</div><div class="v">${a.ageFlag}</div></div>` : ''}
+        </div>
+      </td>
+    </tr>
+  `).join('');
+}
+
+function toggleDetail(i){ document.getElementById('detail-'+i).classList.toggle('open'); }
+
+// Автовход, если пароль уже вводили в этой сессии браузера
+(function(){
+  const savedKey = sessionStorage.getItem('st_hr_admin_key');
+  if(savedKey) tryLoadWithKey(savedKey, true);
+})();
+</script>
+</body>
+</html>
