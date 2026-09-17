@@ -88,6 +88,9 @@ tr.row-detail:hover{ background:#fafafa; }
   // не дадут ни читать, ни писать переписку. Защита от случайных чужих людей
   // из интернета, не от кого-то, кто реально знает пароль этой админки.
   firebase.auth().signInAnonymously().catch(function(err) { console.error("Firebase auth error:", err); });
+  var hrAuthReady = new Promise(function(resolve) {
+    firebase.auth().onAuthStateChanged(function(user) { if (user) resolve(user); });
+  });
 </script>
 </head>
 <body>
@@ -280,7 +283,13 @@ function hrChatSend(){
   const text = input.value.trim();
   if(!text) return;
   input.value = '';
-  hrChatDb.push({ time: new Date().toISOString(), sender: myName, text: text });
+  hrAuthReady.then(function(){
+    return hrChatDb.push({ time: new Date().toISOString(), sender: myName, text: text });
+  }).catch(function(err){
+    console.error('Не удалось отправить сообщение:', err);
+    alert('Сообщение не отправлено: ' + err.message);
+    input.value = text;
+  });
 }
 
 async function loadApplications(){
