@@ -90,8 +90,15 @@ tr.row-detail:hover{ background:#fafafa; }
       <div class="admin-title">Заявки кандидатов</div>
       <div class="admin-sub" id="adminSub">—</div>
       <div class="admin-sub" id="adminWho" style="color:var(--accent); font-weight:600;"></div>
+      <div id="hrOnlineIndicator" style="display:none;margin-top:6px;font-size:13px;color:var(--good);font-weight:600"></div>
     </div>
-    <button class="btn btn-ghost" onclick="loadApplications()">Обновить</button>
+    <div style="display:flex;gap:10px;align-items:center">
+      <button class="btn btn-ghost" onclick="hrChatOpen()" style="position:relative">
+        Чат
+        <span id="hrChatBadge" style="display:none;position:absolute;top:-6px;right:-6px;width:9px;height:9px;border-radius:50%;background:var(--bad)"></span>
+      </button>
+      <button class="btn btn-ghost" onclick="loadApplications()">Обновить</button>
+    </div>
   </div>
 
   <div class="stats-row" id="statsRow"></div>
@@ -112,7 +119,7 @@ tr.row-detail:hover{ background:#fafafa; }
 <script>
 /* Вставь сюда URL деплоя того же Apps Script, что и у основного сайта меню —
    анкеты вакансий (лист "Вакансия") пишутся именно туда */
-const SCRIPT_URL = "https://script.google.com/macros/s/AKfycbwWLSYWkpnkxNbHza6tE1IFPas3bEN5g8MhwvZ65JcQV1Z5S6tFztScCobfY8ArvD3Wxw/exec";
+const SCRIPT_URL = "https://script.google.com/macros/s/AKfycbx0w1ceHme77ardxWATfKVvQiwaHv3HAn3GMtLJI8gyJXBUsPSGOehyVM4JXCzAMegaXg/exec";
 
 let ALL_APPS = [];
 let ACTIVE_FILTER = 'all';
@@ -155,6 +162,111 @@ function showAdminPanel(){
   renderAdminStats();
   renderFilters();
   renderTable();
+  hrStartPresenceAndChat();
+}
+
+// ── "В СЕТИ" — раз в 20 сек сообщаем о себе, узнаём кто ещё активен ──
+let hrPresenceTimer = null;
+let hrChatPollTimer = null;
+let hrChatMessages = [];
+let hrChatUnread = false;
+
+function hrStartPresenceAndChat(){
+  hrPing();
+  clearInterval(hrPresenceTimer);
+  hrPresenceTimer = setInterval(hrPing, 20000);
+  hrChatFetch();
+  clearInterval(hrChatPollTimer);
+  hrChatPollTimer = setInterval(hrChatFetch, 8000);
+}
+
+async function hrPing(){
+  const key = sessionStorage.getItem('st_hr_admin_key');
+  if(!key) return;
+  try{
+    const res = await fetch(SCRIPT_URL + '?action=hrPing&key=' + encodeURIComponent(key));
+    const data = await res.json();
+    if(data.ok){
+      const el = document.getElementById('hrOnlineIndicator');
+      if(data.othersOnline && data.othersOnline.length){
+        el.style.display = 'block';
+        el.textContent = '🟢 В сети: ' + data.othersOnline.join(', ');
+      } else {
+        el.style.display = 'none';
+      }
+    }
+  }catch(err){}
+}
+
+async function hrChatFetch(){
+  const key = sessionStorage.getItem('st_hr_admin_key');
+  if(!key) return;
+  try{
+    const res = await fetch(SCRIPT_URL + '?action=hrChatList&key=' + encodeURIComponent(key));
+    const data = await res.json();
+    if(data.ok){
+      const isNewMsgs = data.messages.length > hrChatMessages.length;
+      hrChatMessages = data.messages || [];
+      hrRenderChat();
+      const ov = document.getElementById('hrChatOv');
+      if(isNewMsgs && (!ov || ov.style.display === 'none')){
+        document.getElementById('hrChatBadge').style.display = 'block';
+      }
+    }
+  }catch(err){}
+}
+
+function hrRenderChat(){
+  const myName = sessionStorage.getItem('st_hr_admin_name') || '';
+  const box = document.getElementById('hrChatMessages');
+  if(!box) return;
+  box.innerHTML = hrChatMessages.map(m => {
+    const mine = m.sender === myName;
+    const time = m.time ? new Date(m.time).toLocaleTimeString('ru-RU',{hour:'2-digit',minute:'2-digit'}) : '';
+    return `<div style="align-self:${mine?'flex-end':'flex-start'};max-width:80%">
+      <div style="font-size:11px;color:var(--muted);margin-bottom:3px;${mine?'text-align:right':''}">${m.sender} · ${time}</div>
+      <div style="padding:9px 13px;border-radius:14px;background:${mine?'var(--accent)':'#f0f0f0'};color:${mine?'#fff':'var(--text)'};font-size:14px;line-height:1.4">${m.text}</div>
+    </div>`;
+  }).join('');
+  box.scrollTop = box.scrollHeight;
+}
+
+function hrChatOpen(){
+  document.getElementById('hrChatOv').style.display = 'block';
+  document.getElementById('hrChatBadge').style.display = 'none';
+  hrChatFetch();
+  clearInterval(hrChatPollTimer);
+  hrChatPollTimer = setInterval(hrChatFetch, 2500);
+}
+
+function hrChatClose(){
+  document.getElementById('hrChatOv').style.display = 'none';
+  clearInterval(hrChatPollTimer);
+  hrChatPollTimer = setInterval(hrChatFetch, 8000);
+}
+
+async function hrChatSend(){
+  const key = sessionStorage.getItem('st_hr_admin_key');
+  const myName = sessionStorage.getItem('st_hr_admin_name') || '';
+  const input = document.getElementById('hrChatInput');
+  const text = input.value.trim();
+  if(!text || !key) return;
+  input.value = '';
+
+  // сразу показываем своё сообщение, не дожидаясь ответа сервера
+  hrChatMessages.push({ time: new Date().toISOString(), sender: myName, text: text });
+  hrRenderChat();
+
+  try{
+    await fetch(SCRIPT_URL, {
+      method:'POST',
+      headers:{ 'Content-Type':'text/plain' },
+      body: JSON.stringify({ action:'hrChatSend', key, text })
+    });
+    hrChatFetch();
+  }catch(err){
+    console.error('Не удалось отправить сообщение', err);
+  }
 }
 
 async function loadApplications(){
@@ -271,5 +383,20 @@ function toggleDetail(i){ document.getElementById('detail-'+i).classList.toggle(
   if(savedKey) tryLoadWithKey(savedKey, true);
 })();
 </script>
+
+<div id="hrChatOv" style="display:none;position:fixed;inset:0;z-index:50;background:rgba(0,0,0,.3)" onclick="if(event.target===this)hrChatClose()">
+  <div style="position:absolute;top:0;right:0;bottom:0;width:min(380px,92vw);background:#fff;display:flex;flex-direction:column">
+    <div style="padding:16px 18px;border-bottom:1px solid var(--line);display:flex;align-items:center;justify-content:space-between">
+      <div style="font-weight:700;font-size:16px">Переписка HR</div>
+      <button onclick="hrChatClose()" style="background:none;border:none;cursor:pointer;font-size:20px;color:var(--muted);line-height:1">&times;</button>
+    </div>
+    <div id="hrChatMessages" style="flex:1;overflow-y:auto;padding:14px 16px;display:flex;flex-direction:column;gap:10px;background:#f5f3f0"></div>
+    <div style="padding:12px 14px;border-top:1px solid var(--line);display:flex;gap:8px">
+      <input type="text" id="hrChatInput" placeholder="Написать…" style="flex:1;font-size:14px;padding:10px 12px;border-radius:10px;border:1.5px solid var(--line);outline:none;font-family:inherit" onkeydown="if(event.key==='Enter')hrChatSend()">
+      <button class="btn btn-primary" onclick="hrChatSend()" style="padding:10px 16px">➤</button>
+    </div>
+  </div>
+</div>
+
 </body>
 </html>
