@@ -586,52 +586,6 @@ function hrScoreTrait(text) {
   };
 }
 
-async function hrRunAiAnalysis(id, btn){
-  const key = sessionStorage.getItem('st_hr_admin_key');
-  const resultBox = document.getElementById('hrAiResult-' + id);
-  const origText = btn.textContent;
-  btn.disabled = true;
-  btn.textContent = 'Думаю…';
-  resultBox.style.display = 'block';
-  resultBox.innerHTML = '<div style="font-size:12px;color:var(--muted)">ИИ читает ответы кандидата…</div>';
-  try{
-    const res = await fetch(SCRIPT_URL + '?action=hrAiAnalyze&key=' + encodeURIComponent(key) + '&id=' + encodeURIComponent(id));
-    const data = await res.json();
-    if(!data.ok){
-      resultBox.innerHTML = '<div style="font-size:12px;color:var(--bad)">Не удалось получить анализ: ' + (data.msg || 'ошибка') + '</div>';
-      return;
-    }
-    const r = data.result;
-    const traits = [
-      { label: 'Стрессоустойчивость', val: r.stress },
-      { label: 'Полная занятость', val: r.commitment },
-      { label: 'Пунктуальность', val: r.punctuality },
-      { label: 'Вежливость', val: r.politeness },
-      { label: 'Ответственность', val: r.responsibility }
-    ];
-    const avg = Math.round(traits.reduce((s,t)=>s+Number(t.val||0),0) / traits.length);
-    resultBox.innerHTML = `
-      <div style="background:#faf7f5;border:1px solid var(--accent-soft);border-radius:12px;padding:14px">
-        <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:10px">
-          <div style="font-weight:700;font-size:13px;color:var(--accent)">✨ Вывод ИИ</div>
-          <span class="score-badge ${avg>=65?'score-good':avg>=40?'score-warn':'score-bad'}">${avg}%</span>
-        </div>
-        ${traits.map(t => `
-          <div style="display:flex;justify-content:space-between;font-size:12px;margin-bottom:6px">
-            <span style="color:var(--muted)">${t.label}</span><span style="font-weight:600">${t.val}%</span>
-          </div>
-        `).join('')}
-        <div style="font-size:12px;line-height:1.5;margin-top:8px;padding-top:8px;border-top:1px solid var(--accent-soft)">${r.verdict || ''}</div>
-      </div>
-    `;
-  }catch(err){
-    resultBox.innerHTML = '<div style="font-size:12px;color:var(--bad)">Ошибка запроса: ' + err.message + '</div>';
-  } finally {
-    btn.disabled = false;
-    btn.textContent = origText;
-  }
-}
-
 function hrBarColor(pct) {
   if (pct >= 65) return 'var(--good)';
   if (pct >= 40) return 'var(--warn)';
@@ -652,12 +606,8 @@ function hrRenderPsychAnalysis(a) {
     <div style="background:var(--surface);border:1px solid var(--line);border-radius:14px;padding:16px 18px;margin-bottom:4px">
       <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:8px">
         <div style="font-weight:700;font-size:14px">Психологический анализ</div>
-        <div style="display:flex;align-items:center;gap:8px">
-          ${overall !== null ? `<span class="score-badge ${overall>=65?'score-good':overall>=40?'score-warn':'score-bad'}">Подходит нам: ${overall}%</span>` : ''}
-          <button onclick="hrRunAiAnalysis('${a.id}', this)" style="font-size:11px;padding:6px 12px;border-radius:8px;border:none;background:var(--accent);color:#fff;cursor:pointer;font-weight:600;font-family:inherit;white-space:nowrap">✨ ИИ-анализ</button>
-        </div>
+        ${overall !== null ? `<span class="score-badge ${overall>=65?'score-good':overall>=40?'score-warn':'score-bad'}">Подходит нам: ${overall}%</span>` : ''}
       </div>
-      <div id="hrAiResult-${a.id}" style="display:none;margin-bottom:12px"></div>
       <div style="font-size:11px;color:var(--muted);margin-bottom:12px">Общий процент считается по всей анкете (опыт, причина ухода и т.д.) — шкалы ниже показывают только 5 психологических ответов по отдельности.</div>
       ${items.map(x => `
         <div style="margin-bottom:10px">
