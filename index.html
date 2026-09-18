@@ -448,6 +448,7 @@ function renderTable(){
     </tr>
     <tr class="detail-row" id="detail-${i}">
       <td colspan="8">
+        <div id="hrPsychBlock-${i}" style="margin-bottom:16px"></div>
         <div class="detail-grid">
           <div><div class="k">Телефон</div><div class="v">${a.phone||'—'}</div></div>
           <div><div class="k">Ответ на вопрос по должности</div><div class="v">${a.roleAnswer||'—'}</div></div>
@@ -459,11 +460,92 @@ function renderTable(){
           <div><div class="k">Предпочитаемый филиал</div><div class="v">${a.preferredBranch||'—'}</div></div>
           <div><div class="k">Откуда узнал(а) о нас</div><div class="v">${a.howFound||'—'}</div></div>
           <div><div class="k">Почему хочет работать у нас</div><div class="v">${a.whyWorkHere||'—'}</div></div>
+          ${a.rkeeperAnswer ? `<div><div class="k">Опыт с R-Keeper</div><div class="v">${a.rkeeperAnswer}</div></div>` : ''}
           ${a.ageFlag ? `<div><div class="k">Возрастное ограничение</div><div class="v">${a.ageFlag}</div></div>` : ''}
         </div>
       </td>
     </tr>
   `).join('');
+
+  rows.forEach((a, i) => {
+    const block = document.getElementById('hrPsychBlock-' + i);
+    if (block) block.innerHTML = hrRenderPsychAnalysis(a);
+  });
+}
+
+// ── Автоматический психологический анализ ──
+// Сайт сам читает свободный ответ кандидата на каждый из 5 вопросов и по
+// ключевым словам (честность/готовность признать против "тихо", "никто не
+// заметит", "промолчу" и т.п.) выставляет процент по качеству. Это не
+// настоящий ИИ, а быстрая эвристика по ключевым словам — черновая оценка,
+// чтобы HR сразу видел ориентир и сам читал текст ответа рядом.
+const HR_TRAITS = [
+  { key: 'stressAnswer', label: 'Стрессоустойчивость',
+    pos: ['спокойн','решу','исправлю','сообщу','постара','справлюсь','найду выход','возьму себя в руки','позвоню','предупрежу'],
+    neg: ['растеря','запаник','не знаю','нервнича','сорвусь','не справлюсь','брошу','уйду'] },
+  { key: 'commitmentAnswer', label: 'Полная занятость',
+    pos: ['сделаю как надо','не буду экономить','по правилам','честно','доведу до конца','не сокращу','как положено','полностью'],
+    neg: ['сокращу','упрощу','быстрее','никто не заметит','сойдёт','срежу','подменю','заменю тихо'] },
+  { key: 'punctualityAnswer', label: 'Пунктуальность',
+    pos: ['предупрежу','сообщу','скажу','честно','по правилам','сразу скажу','объясню'],
+    neg: ['тихо','незаметно','никто не узнает','промолчу','само собой','не скажу'] },
+  { key: 'politenessAnswer', label: 'Вежливость',
+    pos: ['вежливо','спокойно','извинюсь','профессионально','улыбнусь','пойму','выслушаю','не буду грубить'],
+    neg: ['нагрублю','отвечу тем же','разозлюсь','откажу','пошлю','не буду обслуживать'] },
+  { key: 'responsibilityAnswer', label: 'Ответственность',
+    pos: ['сообщу','признаю','исправлю','верну','скажу правду','предупрежу','возьму на себя','вернусь'],
+    neg: ['промолчу','никто не узнает','сделаю вид','не скажу','спишу','забуду'] }
+];
+
+function hrScoreTrait(text) {
+  if (!text || !text.trim()) return null;
+  const lower = text.toLowerCase();
+  return function(cfg) {
+    let s = 55;
+    cfg.pos.forEach(w => { if (lower.includes(w)) s += 10; });
+    cfg.neg.forEach(w => { if (lower.includes(w)) s -= 16; });
+    if (text.trim().length > 40) s += 6;
+    if (text.trim().length < 12) s -= 10;
+    return Math.max(8, Math.min(96, Math.round(s)));
+  };
+}
+
+function hrBarColor(pct) {
+  if (pct >= 65) return 'var(--good)';
+  if (pct >= 40) return 'var(--warn)';
+  return 'var(--bad)';
+}
+
+function hrRenderPsychAnalysis(a) {
+  const items = HR_TRAITS.map(t => {
+    const text = a[t.key] || '';
+    const scorer = hrScoreTrait(text);
+    const pct = scorer ? scorer(t) : null;
+    return { label: t.label, text: text, pct: pct };
+  });
+  const answered = items.filter(x => x.pct !== null);
+  const avg = answered.length ? Math.round(answered.reduce((s,x)=>s+x.pct,0) / answered.length) : null;
+
+  return `
+    <div style="background:var(--surface);border:1px solid var(--line);border-radius:14px;padding:16px 18px;margin-bottom:4px">
+      <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:12px">
+        <div style="font-weight:700;font-size:14px">Психологический анализ</div>
+        ${avg !== null ? `<span class="score-badge ${avg>=65?'score-good':avg>=40?'score-warn':'score-bad'}">${avg}%</span>` : ''}
+      </div>
+      ${items.map(x => `
+        <div style="margin-bottom:10px">
+          <div style="display:flex;justify-content:space-between;font-size:12px;color:var(--muted);margin-bottom:4px">
+            <span>${x.label}</span><span>${x.pct !== null ? x.pct + '%' : '—'}</span>
+          </div>
+          <div style="height:6px;background:#eee;border-radius:4px;overflow:hidden;margin-bottom:6px">
+            <div style="height:100%;width:${x.pct !== null ? x.pct : 0}%;background:${x.pct !== null ? hrBarColor(x.pct) : '#ddd'};border-radius:4px"></div>
+          </div>
+          <div style="font-size:12px;color:var(--text);line-height:1.5">${x.text || '—'}</div>
+        </div>
+      `).join('')}
+      <div style="font-size:11px;color:var(--muted);margin-top:4px">Оценка автоматическая, по ключевым словам в ответе — читайте текст рядом, не полагайтесь только на процент.</div>
+    </div>
+  `;
 }
 
 function toggleDetail(i){ document.getElementById('detail-'+i).classList.toggle('open'); }
