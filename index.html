@@ -69,29 +69,6 @@ tr.row-detail:hover{ background:#fafafa; }
 .empty{ text-align:center; padding:60px 20px; color:var(--muted); }
 .loading{ text-align:center; padding:60px 20px; color:var(--muted); }
 </style>
-<script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-app-compat.js"></script>
-<script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-database-compat.js"></script>
-<script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-auth-compat.js"></script>
-<script>
-  var firebaseConfig = {
-    apiKey: "AIzaSyAGmkaTo3qNhZtLAj2tPA9TXY7uEk5HbSw",
-    authDomain: "cvvseventimes.firebaseapp.com",
-    databaseURL: "https://cvvseventimes-default-rtdb.firebaseio.com",
-    projectId: "cvvseventimes",
-    storageBucket: "cvvseventimes.firebasestorage.app",
-    messagingSenderId: "57411325803",
-    appId: "1:57411325803:web:1ebc61e15da4d59be7862e"
-  };
-  firebase.initializeApp(firebaseConfig);
-  var hrChatDb = firebase.database().ref("hr_chat");
-  // Анонимный вход — гость его не видит, но без него правила базы (auth != null)
-  // не дадут ни читать, ни писать переписку. Защита от случайных чужих людей
-  // из интернета, не от кого-то, кто реально знает пароль этой админки.
-  firebase.auth().signInAnonymously().catch(function(err) { console.error("Firebase auth error:", err); });
-  var hrAuthReady = new Promise(function(resolve) {
-    firebase.auth().onAuthStateChanged(function(user) { if (user) resolve(user); });
-  });
-</script>
 </head>
 <body>
 
@@ -132,7 +109,7 @@ tr.row-detail:hover{ background:#fafafa; }
       <thead>
         <tr>
           <th>Имя</th><th>Должность</th><th>Возраст</th><th>Опыт</th>
-          <th>Соответствие</th><th>Статус</th><th>Обработал(а)</th><th>Дата</th>
+          <th>Подходит нам</th><th>Статус</th><th>Обработал(а)</th><th>Дата</th>
         </tr>
       </thead>
       <tbody id="tbody"><tr><td colspan="8" class="loading">Загрузка…</td></tr></tbody>
@@ -143,7 +120,7 @@ tr.row-detail:hover{ background:#fafafa; }
 <script>
 /* Вставь сюда URL деплоя того же Apps Script, что и у основного сайта меню —
    анкеты вакансий (лист "Вакансия") пишутся именно туда */
-const SCRIPT_URL = "https://script.google.com/macros/s/AKfycbxVhQv2cizNeqONp5rJFi2_wEbw_UQ-A2wh7F9vQtl3rBQ7H0vILRVbNJVzwvv1MoALow/exec";
+const SCRIPT_URL = "https://script.google.com/macros/s/AKfycbx0w1ceHme77ardxWATfKVvQiwaHv3HAn3GMtLJI8gyJXBUsPSGOehyVM4JXCzAMegaXg/exec";
 
 let ALL_APPS = [];
 let ACTIVE_FILTER = 'all';
@@ -187,18 +164,22 @@ function showAdminPanel(){
   renderFilters();
   renderTable();
   hrStartPresenceAndChat();
+  clearInterval(hrAppsRefreshTimer);
+  hrAppsRefreshTimer = setInterval(hrSilentRefreshApplications, 1000);
 }
 
 // ── "В СЕТИ" — раз в 20 сек сообщаем о себе, узнаём кто ещё активен ──
 let hrPresenceTimer = null;
 let hrChatPollTimer = null;
+let hrAppsRefreshTimer = null;
 let hrChatMessages = [];
-let hrChatListenerAttached = false;
 
 function hrLogout(){
   sessionStorage.removeItem('st_hr_admin_key');
   sessionStorage.removeItem('st_hr_admin_name');
   clearInterval(hrPresenceTimer);
+  clearInterval(hrChatPollTimer);
+  clearInterval(hrAppsRefreshTimer);
   document.getElementById('adminPanel').classList.remove('show');
   document.getElementById('adminGate').style.display = 'block';
   document.getElementById('adminPass').value = '';
@@ -208,7 +189,9 @@ function hrStartPresenceAndChat(){
   hrPing();
   clearInterval(hrPresenceTimer);
   hrPresenceTimer = setInterval(hrPing, 20000);
-  hrChatAttachListener();
+  hrChatFetch();
+  clearInterval(hrChatPollTimer);
+  hrChatPollTimer = setInterval(hrChatFetch, 500);
 }
 
 async function hrPing(){
@@ -229,28 +212,24 @@ async function hrPing(){
   }catch(err){}
 }
 
-// ── Живой чат через Firebase Realtime Database — сервер сам толкает
-// новое сообщение в браузер, без единого опроса. Слушатель ставится
-// один раз при входе в админку и работает всё время, пока открыта страница. ──
-function hrChatAttachListener(){
-  if(hrChatListenerAttached) return;
-  hrChatListenerAttached = true;
-  firebase.auth().onAuthStateChanged(function(user){
-    if(!user) return; // вход ещё не завершился — подождём следующего вызова
-    hrChatDb.limitToLast(100).on('value', function(snapshot){
-      const val = snapshot.val() || {};
-      const wasCount = hrChatMessages.length;
-      hrChatMessages = Object.values(val).sort(function(a,b){ return (a.time||'').localeCompare(b.time||''); });
+async function hrChatFetch(){
+  const key = sessionStorage.getItem('st_hr_admin_key');
+  if(!key) return;
+  try{
+    const res = await fetch(SCRIPT_URL + '?action=hrChatList&key=' + encodeURIComponent(key));
+    const data = await res.json();
+    if(data.ok){
+      const isNewMsgs = data.messages.length > hrChatMessages.length;
+      hrChatMessages = data.messages || [];
       hrRenderChat();
       const ov = document.getElementById('hrChatOv');
-      const isNew = hrChatMessages.length > wasCount;
       const myName = sessionStorage.getItem('st_hr_admin_name') || '';
       const lastMsg = hrChatMessages[hrChatMessages.length - 1];
-      if(isNew && lastMsg && lastMsg.sender !== myName && (!ov || ov.style.display !== 'block')){
+      if(isNewMsgs && lastMsg && lastMsg.sender !== myName && (!ov || ov.style.display !== 'block')){
         document.getElementById('hrChatBadge').style.display = 'block';
       }
-    });
-  });
+    }
+  }catch(err){}
 }
 
 function hrRenderChat(){
@@ -277,19 +256,28 @@ function hrChatClose(){
   document.getElementById('hrChatOv').style.display = 'none';
 }
 
-function hrChatSend(){
+async function hrChatSend(){
+  const key = sessionStorage.getItem('st_hr_admin_key');
   const myName = sessionStorage.getItem('st_hr_admin_name') || '';
   const input = document.getElementById('hrChatInput');
   const text = input.value.trim();
-  if(!text) return;
+  if(!text || !key) return;
   input.value = '';
-  hrAuthReady.then(function(){
-    return hrChatDb.push({ time: new Date().toISOString(), sender: myName, text: text });
-  }).catch(function(err){
-    console.error('Не удалось отправить сообщение:', err);
-    alert('Сообщение не отправлено: ' + err.message);
-    input.value = text;
-  });
+
+  // сразу показываем своё сообщение, не дожидаясь ответа сервера
+  hrChatMessages.push({ time: new Date().toISOString(), sender: myName, text: text });
+  hrRenderChat();
+
+  try{
+    await fetch(SCRIPT_URL, {
+      method:'POST',
+      headers:{ 'Content-Type':'text/plain' },
+      body: JSON.stringify({ action:'hrChatSend', key, text })
+    });
+    hrChatFetch();
+  }catch(err){
+    console.error('Не удалось отправить сообщение', err);
+  }
 }
 
 async function loadApplications(){
@@ -308,6 +296,21 @@ async function loadApplications(){
   }
 }
 
+// Тихое автообновление списка анкет — раз в секунду, без мигания "Загрузка…"
+async function hrSilentRefreshApplications(){
+  const key = sessionStorage.getItem('st_hr_admin_key');
+  if(!key) return;
+  try{
+    const res = await fetch(SCRIPT_URL + '?action=hrList&key=' + encodeURIComponent(key));
+    const data = await res.json();
+    if(data.ok === false) return;
+    ALL_APPS = data.rows || [];
+    renderAdminStats();
+    renderFilters();
+    renderTable();
+  }catch(err){}
+}
+
 const STATUSES = ["Новая", "Позвонили", "Собеседование назначено", "Принят(а)", "Отказ"];
 
 let hrEditingId = null;
@@ -318,7 +321,11 @@ function hrOpenStatusEditor(id){
   hrEditingId = id;
   document.getElementById('hrStatusName').textContent = a.name || '—';
   const sel = document.getElementById('hrStatusSelect');
-  sel.innerHTML = STATUSES.map(s=>`<option value="${s}" ${((a.status||'Новая')===s)?'selected':''}>${s}</option>`).join('');
+  const currentIdx = STATUSES.indexOf(a.status || 'Новая');
+  sel.innerHTML = STATUSES.map((s,idx)=>{
+    const isPast = idx <= currentIdx && s !== 'Отказ';
+    return `<option value="${s}" ${(a.status||'Новая')===s?'selected':''} ${isPast && (a.status||'Новая')!==s?'disabled':''}>${s}${isPast && (a.status||'Новая')!==s?' (уже пройдено)':''}</option>`;
+  }).join('');
   document.getElementById('hrInterviewYearLabel').textContent = 'Дата и время собеседования (' + new Date().getFullYear() + ' год)';
   hrBuildInterviewPickers(a);
   hrStatusSelectChange();
@@ -431,7 +438,7 @@ function renderTable(){
     return;
   }
   document.getElementById('tbody').innerHTML = rows.map((a,i)=>`
-    <tr class="row-detail" onclick="toggleDetail(${i})">
+    <tr class="row-detail" onclick="toggleDetail(${i}, '${a.id}')">
       <td><b>${a.name||'—'}</b>${a.ageFlag ? `<div style="margin-top:4px;"><span class="score-badge score-warn" title="${a.ageFlag}">до 18 лет</span></div>` : ''}</td>
       <td>${a.position||'—'}</td>
       <td>${a.age||'—'}</td>
@@ -470,6 +477,10 @@ function renderTable(){
   rows.forEach((a, i) => {
     const block = document.getElementById('hrPsychBlock-' + i);
     if (block) block.innerHTML = hrRenderPsychAnalysis(a);
+    if (hrOpenDetailIds.has(a.id)) {
+      const detailRow = document.getElementById('detail-' + i);
+      if (detailRow) detailRow.classList.add('open');
+    }
   });
 }
 
@@ -479,6 +490,60 @@ function renderTable(){
 // заметит", "промолчу" и т.п.) выставляет процент по качеству. Это не
 // настоящий ИИ, а быстрая эвристика по ключевым словам — черновая оценка,
 // чтобы HR сразу видел ориентир и сам читал текст ответа рядом.
+// Реальные тексты вопросов по должностям — совпадают один в один с тем,
+// что видел кандидат при заполнении анкеты на сайте меню.
+const HR_ROLE_PSYCH_QUESTIONS = {
+  "Официант": {
+    stressAnswer: "Вы уронили поднос с заказом, но никто в зале этого не заметил — гость всё равно скоро спросит, где его блюдо. Ваши действия?",
+    commitmentAnswer: "Вечер, касса не сходится на небольшую сумму, объяснить нечем, а до конца смены десять минут. Ваши действия?",
+    punctualityAnswer: "Кухня явно не успевает, но администратора рядом нет, а гость уже спрашивает, где заказ. Ваши действия?",
+    politenessAnswer: "Гость нахамил вам прилюдно при других гостях, а через пять минут как ни в чём не бывало просит принести десерт без очереди. Ваши действия?",
+    responsibilityAnswer: "Вы забыли передать пожелание гостя на кухню, блюдо уже готовят неправильно, а гость пока ничего не заметил. Ваши действия?"
+  },
+  "Бариста": {
+    stressAnswer: "Кофемашина сломалась в разгар потока, а следующий клиент уже нервно поглядывает на часы. Ваши действия?",
+    commitmentAnswer: "Молоко нужного вида закончилось, но похожее есть — можно тихо заменить и никто, скорее всего, не заметит. Ваши действия?",
+    punctualityAnswer: "Очередь растёт, и вы понимаете, что можно немного сократить время приготовления, не соблюдая рецепт полностью. Ваши действия?",
+    politenessAnswer: "Клиент грубо жалуется на вкус напитка, хотя вы точно всё сделали по рецепту. Ваши действия?",
+    responsibilityAnswer: "Клиент уверяет, что заказывал двойную порцию, хотя вы помните — одну, а чек уже выброшен. Ваши действия?"
+  },
+  "Повар — горячий цех": {
+    stressAnswer: "Погасла плита, заказ горит по времени, а рядом никого из руководства. Ваши действия?",
+    commitmentAnswer: "Заказов скопилось много, и вы понимаете, что можно немного сократить процесс готовки — гость вряд ли заметит. Ваши действия?",
+    punctualityAnswer: "Закончился ключевой ингредиент, но есть похожий заменитель — можно тихо использовать его и не говорить администратору. Ваши действия?",
+    politenessAnswer: "Официант кричит на вас при всей кухне, что блюдо готовится слишком долго, хотя вы всё делаете правильно. Ваши действия?",
+    responsibilityAnswer: "Вы заметили, что коллега занизил время готовки в отчёте, и вас об этом никто не спрашивал. Ваши действия?"
+  },
+  "Повар — суши/холодный цех": {
+    stressAnswer: "Сломался нож в разгар потока заказов, а запасного под рукой нет. Ваши действия?",
+    commitmentAnswer: "Официант торопит — гость жалуется, что суши отдаёте медленно, и вы понимаете, что можно срезать пару шагов приготовления. Ваши действия?",
+    punctualityAnswer: "Заказов много, а нужных заготовок не хватает — есть похожая рыба, которую можно тихо пустить вместо нужной. Ваши действия?",
+    politenessAnswer: "Гость жалуется, что суши не понравились, и требует деньги обратно, хотя вы уверены — всё было свежее. Ваши действия?",
+    responsibilityAnswer: "Вы заметили, что рыба на грани свежести, а её уже собираются пустить в работу, и никто пока не спросил вашего мнения. Ваши действия?"
+  },
+  "Повар фастфуд / гриль": {
+    stressAnswer: "Погас гриль в разгар потока заказов, а очередь на кассе продолжает расти. Ваши действия?",
+    commitmentAnswer: "Очередь растёт быстрее, чем вы успеваете собирать заказы, и вы понимаете, что можно немного упростить сборку. Ваши действия?",
+    punctualityAnswer: "Закончились булочки нужного вида, но есть похожие — можно тихо заменить, гость вряд ли обратит внимание. Ваши действия?",
+    politenessAnswer: "Гость на кассе грубо жалуется, что заказ собрали неправильно, хотя вы уверены — всё верно. Ваши действия?",
+    responsibilityAnswer: "Гость утверждает, что ему не доложили ингредиент, хотя вы точно помните обратное, а чек уже не проверить. Ваши действия?"
+  },
+  "Тех персонал": {
+    stressAnswer: "Что-то разлилось в зале в самый разгар работы, а рядом никого из старших нет. Ваши действия?",
+    commitmentAnswer: "Нужно убрать несколько столов одновременно, гости ждут, и вы понимаете, что можно убрать быстрее, но не так тщательно. Ваши действия?",
+    punctualityAnswer: "Закончились чистящие средства, но есть похожие под рукой без нужной маркировки. Ваши действия?",
+    politenessAnswer: "Коллега грубо делает замечание по поводу вашей работы прилюдно, хотя вы всё сделали правильно. Ваши действия?",
+    responsibilityAnswer: "Вы заметили, что коллега не убрал за собой, но отчитался, что всё сделано, а проверять никто не будет. Ваши действия?"
+  },
+  "Курьер": {
+    stressAnswer: "Кассир вас торопит и повышает голос при других сотрудниках. Ваши действия?",
+    commitmentAnswer: "Смена почти закончилась, но пришёл ещё один заказ на дальний адрес, и его вполне можно передать другому курьеру. Ваши действия?",
+    punctualityAnswer: "Вы застряли в пробке, заказ точно задержится, а до этого можно было поехать другой дорогой. Ваши действия?",
+    politenessAnswer: "Клиент не выходит и не берёт трубку уже десять минут, а заказ остывает у вас в руках. Ваши действия?",
+    responsibilityAnswer: "Вы уже отъехали от клиента и поняли, что отдали не весь заказ, а возвращаться совсем не хочется. Ваши действия?"
+  }
+};
+
 const HR_TRAITS = [
   { key: 'stressAnswer', label: 'Стрессоустойчивость',
     pos: ['спокойн','решу','исправлю','сообщу','постара','справлюсь','найду выход','возьму себя в руки','позвоню','предупрежу'],
@@ -517,11 +582,12 @@ function hrBarColor(pct) {
 }
 
 function hrRenderPsychAnalysis(a) {
+  const roleQs = HR_ROLE_PSYCH_QUESTIONS[a.position] || {};
   const items = HR_TRAITS.map(t => {
     const text = a[t.key] || '';
     const scorer = hrScoreTrait(text);
     const pct = scorer ? scorer(t) : null;
-    return { label: t.label, text: text, pct: pct };
+    return { label: t.label, question: roleQs[t.key] || '', text: text, pct: pct };
   });
   const answered = items.filter(x => x.pct !== null);
   const avg = answered.length ? Math.round(answered.reduce((s,x)=>s+x.pct,0) / answered.length) : null;
@@ -534,9 +600,10 @@ function hrRenderPsychAnalysis(a) {
       </div>
       ${items.map(x => `
         <div style="margin-bottom:10px">
-          <div style="display:flex;justify-content:space-between;font-size:12px;color:var(--muted);margin-bottom:4px">
+          <div style="display:flex;justify-content:space-between;font-size:12px;color:var(--muted);margin-bottom:2px">
             <span>${x.label}</span><span>${x.pct !== null ? x.pct + '%' : '—'}</span>
           </div>
+          ${x.question ? `<div style="font-size:11px;color:var(--muted);font-style:italic;margin-bottom:4px">${x.question}</div>` : ''}
           <div style="height:6px;background:#eee;border-radius:4px;overflow:hidden;margin-bottom:6px">
             <div style="height:100%;width:${x.pct !== null ? x.pct : 0}%;background:${x.pct !== null ? hrBarColor(x.pct) : '#ddd'};border-radius:4px"></div>
           </div>
@@ -548,7 +615,11 @@ function hrRenderPsychAnalysis(a) {
   `;
 }
 
-function toggleDetail(i){ document.getElementById('detail-'+i).classList.toggle('open'); }
+let hrOpenDetailIds = new Set();
+function toggleDetail(i, id){
+  document.getElementById('detail-'+i).classList.toggle('open');
+  if(hrOpenDetailIds.has(id)) hrOpenDetailIds.delete(id); else hrOpenDetailIds.add(id);
+}
 
 // Автовход, если пароль уже вводили в этой сессии браузера
 (function(){
