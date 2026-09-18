@@ -322,7 +322,8 @@ function hrOpenStatusEditor(id){
   document.getElementById('hrStatusName').textContent = a.name || '—';
   const sel = document.getElementById('hrStatusSelect');
   const currentIdx = STATUSES.indexOf(a.status || 'Новая');
-  sel.innerHTML = STATUSES.map((s,idx)=>{
+  sel.innerHTML = STATUSES.filter(s => s !== 'Новая').map((s)=>{
+    const idx = STATUSES.indexOf(s);
     const isPast = idx <= currentIdx && s !== 'Отказ';
     return `<option value="${s}" ${(a.status||'Новая')===s?'selected':''} ${isPast && (a.status||'Новая')!==s?'disabled':''}>${s}${isPast && (a.status||'Новая')!==s?' (уже пройдено)':''}</option>`;
   }).join('');
@@ -564,14 +565,20 @@ const HR_TRAITS = [
 
 function hrScoreTrait(text) {
   if (!text || !text.trim()) return null;
-  const lower = text.toLowerCase();
+  const lower = text.toLowerCase().trim();
+  const harshWords = ['похуй','пофиг','плевать','насрать','наплевать','забью','похер'];
+  const dismissiveWords = ['не буду','уйду','ничего не сдела','ничего не буду','нет','не знаю','промолчу','никто не узнает','сойдёт','откажу','нагруб','разозл','пошлю'];
   return function(cfg) {
-    let s = 55;
-    cfg.pos.forEach(w => { if (lower.includes(w)) s += 10; });
-    cfg.neg.forEach(w => { if (lower.includes(w)) s -= 16; });
-    if (text.trim().length > 40) s += 6;
-    if (text.trim().length < 12) s -= 10;
-    return Math.max(8, Math.min(96, Math.round(s)));
+    let s = 50;
+    // грубая/безразличная отписка — сразу низкий балл, независимо от остального
+    if (harshWords.some(w => lower.includes(w))) return 5;
+    cfg.pos.forEach(w => { if (lower.includes(w)) s += 9; });
+    cfg.neg.forEach(w => { if (lower.includes(w)) s -= 15; });
+    dismissiveWords.forEach(w => { if (lower.includes(w)) s -= 12; });
+    if (lower.length > 60) s += 10;
+    else if (lower.length > 30) s += 5;
+    else if (lower.length < 10) s -= 15;
+    return Math.max(4, Math.min(97, Math.round(s)));
   };
 }
 
