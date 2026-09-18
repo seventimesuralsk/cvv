@@ -304,7 +304,14 @@ async function hrSilentRefreshApplications(){
     const res = await fetch(SCRIPT_URL + '?action=hrList&key=' + encodeURIComponent(key));
     const data = await res.json();
     if(data.ok === false) return;
-    ALL_APPS = data.rows || [];
+    const freshRows = data.rows || [];
+    // Сливаем, а не заменяем целиком — иначе только что показанный результат
+    // ИИ-анализа (он живёт только в браузере, на сервере хранится лишь балл)
+    // стирался бы каждую секунду вместе со всем остальным списком.
+    const oldById = {};
+    ALL_APPS.forEach(a => { if(a.aiVerdict) oldById[a.id] = a.aiVerdict; });
+    freshRows.forEach(a => { if(oldById[a.id]) a.aiVerdict = oldById[a.id]; });
+    ALL_APPS = freshRows;
     renderAdminStats();
     renderFilters();
     renderTable();
