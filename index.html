@@ -164,8 +164,6 @@ function showAdminPanel(){
   renderFilters();
   renderTable();
   hrStartPresenceAndChat();
-  clearInterval(hrAppsRefreshTimer);
-  hrAppsRefreshTimer = setInterval(hrSilentRefreshApplications, 1000);
 }
 
 // ── "В СЕТИ" — раз в 20 сек сообщаем о себе, узнаём кто ещё активен ──
@@ -187,11 +185,7 @@ function hrLogout(){
 
 function hrStartPresenceAndChat(){
   hrPing();
-  clearInterval(hrPresenceTimer);
-  hrPresenceTimer = setInterval(hrPing, 20000);
   hrChatFetch();
-  clearInterval(hrChatPollTimer);
-  hrChatPollTimer = setInterval(hrChatFetch, 500);
 }
 
 async function hrPing(){
@@ -250,6 +244,7 @@ function hrRenderChat(){
 function hrChatOpen(){
   document.getElementById('hrChatOv').style.display = 'block';
   document.getElementById('hrChatBadge').style.display = 'none';
+  hrChatFetch();
 }
 
 function hrChatClose(){
