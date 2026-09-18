@@ -120,7 +120,7 @@ tr.row-detail:hover{ background:#fafafa; }
 <script>
 /* Вставь сюда URL деплоя того же Apps Script, что и у основного сайта меню —
    анкеты вакансий (лист "Вакансия") пишутся именно туда */
-const SCRIPT_URL = "https://script.google.com/macros/s/AKfycbzdLCIVC2sqdXX0-ySbm5i5yE0zSLac_18pWFtgm_1cjv2ECndYUM7k2P5SNvnlieuBxA/exec";
+const SCRIPT_URL = "https://script.google.com/macros/s/AKfycbwxSN0QWpGjhf5MBf5JjqSSNuGnqYEbYvWN6vkLRLld4RuGIM1dpkxcrzG1kPtW8y0ajQ/exec";
 
 let ALL_APPS = [];
 let ACTIVE_FILTER = 'all';
@@ -282,13 +282,35 @@ async function loadApplications(){
   try{
     const res = await fetch(SCRIPT_URL + '?action=hrList&key=' + encodeURIComponent(key));
     const data = await res.json();
-    ALL_APPS = data.rows || [];
+    ALL_APPS = hrHydrateAiVerdicts(data.rows || []);
     renderAdminStats();
     renderFilters();
     renderTable();
   }catch(err){
     document.getElementById('tbody').innerHTML = `<tr><td colspan="8" class="empty">Не удалось загрузить данные. Проверь SCRIPT_URL.</td></tr>`;
   }
+}
+
+// Превращает сохранённый в таблице сырой JSON от ИИ обратно в тот же вид,
+// в котором его ждёт карточка — чтобы после обновления страницы кнопка
+// "ИИ-анализ" не появлялась заново для уже проверенных кандидатов.
+function hrHydrateAiVerdicts(rows){
+  return rows.map(a => {
+    if(!a.aiResultRaw) return a;
+    try{
+      const r = JSON.parse(a.aiResultRaw);
+      const traits = [
+        { label: 'Стрессоустойчивость', val: r.stress },
+        { label: 'Полная занятость', val: r.commitment },
+        { label: 'Пунктуальность', val: r.punctuality },
+        { label: 'Вежливость', val: r.politeness },
+        { label: 'Ответственность', val: r.responsibility }
+      ];
+      const avg = Math.round(traits.reduce((s,t)=>s+Number(t.val||0),0) / traits.length);
+      a.aiVerdict = { traits, avg, verdict: r.verdict };
+    }catch(e){}
+    return a;
+  });
 }
 
 // Тихое автообновление списка анкет — раз в секунду, без мигания "Загрузка…"
@@ -299,13 +321,7 @@ async function hrSilentRefreshApplications(){
     const res = await fetch(SCRIPT_URL + '?action=hrList&key=' + encodeURIComponent(key));
     const data = await res.json();
     if(data.ok === false) return;
-    const freshRows = data.rows || [];
-    // Сливаем, а не заменяем целиком — иначе только что показанный результат
-    // ИИ-анализа (он живёт только в браузере, на сервере хранится лишь балл)
-    // стирался бы каждую секунду вместе со всем остальным списком.
-    const oldById = {};
-    ALL_APPS.forEach(a => { if(a.aiVerdict) oldById[a.id] = a.aiVerdict; });
-    freshRows.forEach(a => { if(oldById[a.id]) a.aiVerdict = oldById[a.id]; });
+    const freshRows = hrHydrateAiVerdicts(data.rows || []);
     ALL_APPS = freshRows;
     renderAdminStats();
     renderFilters();
