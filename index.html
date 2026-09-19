@@ -141,7 +141,7 @@ async function tryLoadWithKey(key, silent){
     if(data.ok){
       sessionStorage.setItem('st_hr_admin_key', key);
       sessionStorage.setItem('st_hr_admin_name', data.adminName || '');
-      ALL_APPS = data.rows || [];
+      ALL_APPS = hrHydrateAiVerdicts(data.rows || []);
       showAdminPanel();
     } else {
       sessionStorage.removeItem('st_hr_admin_key');
