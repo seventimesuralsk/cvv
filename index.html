@@ -20,11 +20,11 @@ body{
   border-bottom:1px solid var(--line);
 }
 .brand{font-weight:600; font-size:15px; letter-spacing:-.01em;}
-input[type=text]{
+input[type=text],input[type=password]{
   font-size:16px; padding:12px 14px; border-radius:10px; border:1.5px solid var(--line);
   background:var(--surface); color:var(--text); outline:none; font-family:inherit; width:100%;
 }
-input[type=text]:focus{ border-color:var(--accent); }
+input[type=text]:focus,input[type=password]:focus{ border-color:var(--accent); }
 .btn{
   padding:12px 20px; border-radius:10px; border:none; cursor:pointer;
   font-size:15px; font-weight:600; font-family:inherit;
@@ -75,7 +75,7 @@ tr.row-detail:hover{ background:#fafafa; }
 <div class="gate" id="adminGate">
   <h2>Доступ к анкетам</h2>
   <p>Введите пароль отдела кадров</p>
-  <input type="text" id="adminPass" placeholder="Пароль">
+  <input type="password" id="adminPass" placeholder="Пароль" autocomplete="current-password" onkeydown="if(event.key==='Enter')adminLogin()">
   <button class="btn btn-primary" style="width:100%;" onclick="adminLogin()">Войти</button>
   <div class="err" id="adminErr">Неверный пароль</div>
 </div>
@@ -87,6 +87,7 @@ tr.row-detail:hover{ background:#fafafa; }
       <div class="admin-sub" id="adminSub">—</div>
       <div class="admin-sub" id="adminWho" style="color:var(--accent); font-weight:600;"></div>
       <div id="hrOnlineIndicator" style="display:none;margin-top:6px;font-size:13px;color:var(--good);font-weight:600"></div>
+      <style>#hrOnlineIndicator::before{content:"";display:inline-block;width:8px;height:8px;border-radius:50%;background:var(--good);margin-right:6px;vertical-align:1px}</style>
     </div>
     <div style="display:flex;gap:10px;align-items:center">
       <button class="btn btn-ghost" onclick="hrChatOpen()" style="position:relative">
@@ -116,7 +117,16 @@ tr.row-detail:hover{ background:#fafafa; }
 <script>
 /* Вставь сюда URL деплоя того же Apps Script, что и у основного сайта меню —
    анкеты вакансий (лист "Вакансия") пишутся именно туда */
-const SCRIPT_URL = "https://script.google.com/macros/s/AKfycbxz4kWvKKHmMJ8R1cSZPn9rh6U089QMyz0P_pqS-1saO6V_WYJJgprCklH8v6vjt6D1Dg/exec";
+const SCRIPT_URL = "https://script.google.com/macros/s/AKfycbxQXdH_4zf-DcuFxdB6lpHvcwkzfyhUw2f0nLh98FcUd7Z6i8AM-84ZjotY4Y7oQcEOlA/exec";
+
+// Всё, что пишут кандидаты в анкете, и сообщения чата выводим только экранированными:
+// иначе кандидат мог вписать в анкету код, который выполнится у отдела кадров.
+function esc(v){ return String(v == null ? '' : v).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c])); }
+// запрос с таймаутом — чтобы кнопки не зависали навсегда при плохой сети
+function getJson(url, opts, ms){
+  const ctl = new AbortController(); const t = setTimeout(() => ctl.abort(), ms || 20000);
+  return fetch(url, Object.assign({ signal: ctl.signal }, opts || {})).then(r => r.json()).finally(() => clearTimeout(t));
+}
 
 let ALL_APPS = [];
 let ACTIVE_FILTER = 'all';
@@ -132,8 +142,7 @@ async function tryLoadWithKey(key, silent){
   const btn = document.querySelector('#adminGate button');
   if(!silent && btn) btn.textContent = 'Проверяем…';
   try{
-    const res = await fetch(SCRIPT_URL + '?action=hrList&key=' + encodeURIComponent(key));
-    const data = await res.json();
+    const data = await getJson(SCRIPT_URL + '?action=hrList&key=' + encodeURIComponent(key));
     if(data.ok){
       sessionStorage.setItem('st_hr_admin_key', key);
       sessionStorage.setItem('st_hr_admin_name', data.adminName || '');
@@ -182,19 +191,26 @@ function hrLogout(){
 function hrStartPresenceAndChat(){
   hrPing();
   hrChatFetch();
+  // раньше таймеры объявлялись, но не запускались — ничего не обновлялось само
+  clearInterval(hrPresenceTimer); clearInterval(hrChatPollTimer); clearInterval(hrAppsRefreshTimer);
+  hrPresenceTimer = setInterval(() => { if(!document.hidden) hrPing(); }, 30000);
+  hrChatPollTimer = setInterval(() => { if(!document.hidden) hrChatFetch(); }, 10000);
+  hrAppsRefreshTimer = setInterval(() => { if(!document.hidden && !hrEditingId) hrSilentRefreshApplications(); }, 30000);
 }
+document.addEventListener('visibilitychange', () => {
+  if(!document.hidden && sessionStorage.getItem('st_hr_admin_key')){ hrPing(); hrChatFetch(); hrSilentRefreshApplications(); }
+});
 
 async function hrPing(){
   const key = sessionStorage.getItem('st_hr_admin_key');
   if(!key) return;
   try{
-    const res = await fetch(SCRIPT_URL + '?action=hrPing&key=' + encodeURIComponent(key));
-    const data = await res.json();
+    const data = await getJson(SCRIPT_URL + '?action=hrPing&key=' + encodeURIComponent(key));
     if(data.ok){
       const el = document.getElementById('hrOnlineIndicator');
       if(data.othersOnline && data.othersOnline.length){
         el.style.display = 'block';
-        el.textContent = '🟢 В сети: ' + data.othersOnline.join(', ');
+        el.textContent = 'В сети: ' + data.othersOnline.join(', ');
       } else {
         el.style.display = 'none';
       }
@@ -206,10 +222,9 @@ async function hrChatFetch(){
   const key = sessionStorage.getItem('st_hr_admin_key');
   if(!key) return;
   try{
-    const res = await fetch(SCRIPT_URL + '?action=hrChatList&key=' + encodeURIComponent(key));
-    const data = await res.json();
+    const data = await getJson(SCRIPT_URL + '?action=hrChatList&key=' + encodeURIComponent(key));
     if(data.ok){
-      const isNewMsgs = data.messages.length > hrChatMessages.length;
+      const isNewMsgs = (data.messages || []).length > hrChatMessages.length;
       hrChatMessages = data.messages || [];
       hrRenderChat();
       const ov = document.getElementById('hrChatOv');
@@ -230,8 +245,8 @@ function hrRenderChat(){
     const mine = m.sender === myName;
     const time = m.time ? new Date(m.time).toLocaleTimeString('ru-RU',{hour:'2-digit',minute:'2-digit'}) : '';
     return `<div style="align-self:${mine?'flex-end':'flex-start'};max-width:80%">
-      <div style="font-size:11px;color:var(--muted);margin-bottom:3px;${mine?'text-align:right':''}">${m.sender} · ${time}</div>
-      <div style="padding:9px 13px;border-radius:14px;background:${mine?'var(--accent)':'#f0f0f0'};color:${mine?'#fff':'var(--text)'};font-size:14px;line-height:1.4">${m.text}</div>
+      <div style="font-size:11px;color:var(--muted);margin-bottom:3px;${mine?'text-align:right':''}">${esc(m.sender)} · ${time}</div>
+      <div style="padding:9px 13px;border-radius:14px;background:${mine?'var(--accent)':'#f0f0f0'};color:${mine?'#fff':'var(--text)'};font-size:14px;line-height:1.4;white-space:pre-wrap;word-break:break-word">${esc(m.text)}</div>
     </div>`;
   }).join('');
   box.scrollTop = box.scrollHeight;
@@ -256,18 +271,23 @@ async function hrChatSend(){
   input.value = '';
 
   // сразу показываем своё сообщение, не дожидаясь ответа сервера
-  hrChatMessages.push({ time: new Date().toISOString(), sender: myName, text: text });
+  hrChatMessages.push({ time: new Date().toISOString(), sender: myName, text: text, pending: true });
   hrRenderChat();
 
   try{
-    await fetch(SCRIPT_URL, {
+    const r = await getJson(SCRIPT_URL, {
       method:'POST',
       headers:{ 'Content-Type':'text/plain' },
       body: JSON.stringify({ action:'hrChatSend', key, text })
     });
+    if(r && r.ok === false) throw new Error('not ok');
     hrChatFetch();
   }catch(err){
-    console.error('Не удалось отправить сообщение', err);
+    // не молчим: возвращаем текст в поле, чтобы не потерялся
+    hrChatMessages = hrChatMessages.filter(m => !(m.pending && m.text === text));
+    hrRenderChat();
+    input.value = text;
+    alert('Сообщение не отправлено — проверьте интернет и попробуйте ещё раз');
   }
 }
 
@@ -276,24 +296,23 @@ async function loadApplications(){
   if(!key) return;
   document.getElementById('tbody').innerHTML = `<tr><td colspan="7" class="loading">Загрузка…</td></tr>`;
   try{
-    const res = await fetch(SCRIPT_URL + '?action=hrList&key=' + encodeURIComponent(key));
-    const data = await res.json();
+    const data = await getJson(SCRIPT_URL + '?action=hrList&key=' + encodeURIComponent(key));
+    if(data.ok === false){ hrLogout(); return; }
     ALL_APPS = data.rows || [];
     renderAdminStats();
     renderFilters();
     renderTable();
   }catch(err){
-    document.getElementById('tbody').innerHTML = `<tr><td colspan="7" class="empty">Не удалось загрузить данные. Проверь SCRIPT_URL.</td></tr>`;
+    document.getElementById('tbody').innerHTML = `<tr><td colspan="7" class="empty">Не удалось загрузить данные. Проверьте интернет и нажмите «Обновить».</td></tr>`;
   }
 }
 
-// Тихое автообновление списка анкет — раз в секунду, без мигания "Загрузка…"
+// Тихое автообновление списка анкет — раз в 30 секунд, без мигания "Загрузка…"
 async function hrSilentRefreshApplications(){
   const key = sessionStorage.getItem('st_hr_admin_key');
   if(!key) return;
   try{
-    const res = await fetch(SCRIPT_URL + '?action=hrList&key=' + encodeURIComponent(key));
-    const data = await res.json();
+    const data = await getJson(SCRIPT_URL + '?action=hrList&key=' + encodeURIComponent(key));
     if(data.ok === false) return;
     ALL_APPS = data.rows || [];
     renderAdminStats();
@@ -319,9 +338,9 @@ function hrOpenStatusEditor(id){
     const idx = STATUSES.indexOf(s);
     const isDone = idx <= currentIdx && s !== 'Отказ'; // включая текущий статус — его тоже нельзя выбрать повторно
     const isFirstOpen = i === firstOpenIdx && !isDone;
-    return `<option value="${s}" ${isFirstOpen?'selected':''} ${isDone?'disabled':''}>${s}${isDone?' (уже выполнено)':''}</option>`;
+    return `<option value="${esc(s)}" ${isFirstOpen?'selected':''} ${isDone?'disabled':''}>${esc(s)}${isDone?' (уже выполнено)':''}</option>`;
   }).join('');
-  document.getElementById('hrInterviewYearLabel').textContent = 'Дата и время собеседования (' + new Date().getFullYear() + ' год)';
+  document.getElementById('hrInterviewYearLabel').textContent = 'Дата и время собеседования';
   hrBuildInterviewPickers(a);
   hrStatusSelectChange();
   document.getElementById('hrStatusOv').style.display = 'flex';
@@ -332,20 +351,22 @@ function hrCloseStatusEditor(){
   hrEditingId = null;
 }
 
-// Год и месяц зафиксированы (текущий месяц, текущий год) — выбирать нужно
-// только день (от сегодняшнего числа до конца месяца) и час, никаких лишних кликов.
+// Ближайшие 30 дней (раньше — только до конца текущего месяца: в конце месяца
+// назначить собеседование на начало следующего было нельзя). Значение — "ДД.ММ".
 function hrBuildInterviewPickers(a){
   const now = new Date();
-  const daysInMonth = new Date(now.getFullYear(), now.getMonth()+1, 0).getDate();
   const daySel = document.getElementById('hrInterviewDay');
+  const WD = ['вс','пн','вт','ср','чт','пт','сб'];
   let dayOpts = '';
-  for(let d=now.getDate(); d<=daysInMonth; d++){
-    dayOpts += `<option value="${d}">${String(d).padStart(2,'0')}.${String(now.getMonth()+1).padStart(2,'0')}</option>`;
+  for(let i=0; i<30; i++){
+    const d = new Date(now.getFullYear(), now.getMonth(), now.getDate()+i);
+    const v = String(d.getDate()).padStart(2,'0') + '.' + String(d.getMonth()+1).padStart(2,'0');
+    dayOpts += `<option value="${v}">${v}, ${WD[d.getDay()]}${i===0?' (сегодня)':i===1?' (завтра)':''}</option>`;
   }
   daySel.innerHTML = dayOpts;
   if(a.interviewDate){
-    const dayNum = parseInt(a.interviewDate);
-    if(dayNum) daySel.value = dayNum;
+    const m = String(a.interviewDate).match(/^(\d{1,2})(?:\.(\d{1,2}))?/);
+    if(m){ const v = m[1].padStart(2,'0') + '.' + (m[2] ? m[2].padStart(2,'0') : String(now.getMonth()+1).padStart(2,'0')); if([...daySel.options].some(o => o.value === v)) daySel.value = v; }
   }
 
   const hourSel = document.getElementById('hrInterviewHour');
@@ -369,20 +390,18 @@ async function hrSaveStatus(){
   const newStatus = document.getElementById('hrStatusSelect').value;
   let interviewDate = '', interviewTime = '';
   if(newStatus === 'Собеседование назначено'){
-    const daySel = document.getElementById('hrInterviewDay');
-    const now = new Date();
-    interviewDate = daySel.value ? (String(daySel.value).padStart(2,'0') + '.' + String(now.getMonth()+1).padStart(2,'0')) : '';
+    interviewDate = document.getElementById('hrInterviewDay').value || '';
     interviewTime = document.getElementById('hrInterviewHour').value || '';
   }
   const btn = document.getElementById('hrStatusSaveBtn');
   btn.disabled = true; btn.textContent = 'Сохраняем…';
   try{
-    const res = await fetch(SCRIPT_URL, {
+    const data = await getJson(SCRIPT_URL, {
       method:'POST',
       headers:{ 'Content-Type':'text/plain' },
       body: JSON.stringify({ action:'hrUpdateStatus', key, id:hrEditingId, status:newStatus, adminName, interviewDate, interviewTime })
     });
-    const data = await res.json();
+    if(!data.ok) alert('Статус не сохранился. Попробуйте ещё раз.');
     if(data.ok){
       const item = ALL_APPS.find(a=>a.id===hrEditingId);
       if(item){
@@ -396,7 +415,7 @@ async function hrSaveStatus(){
       hrCloseStatusEditor();
     }
   }catch(err){
-    console.error('Не удалось обновить статус', err);
+    alert('Нет соединения — статус не сохранился. Попробуйте ещё раз.');
   } finally {
     btn.disabled = false; btn.textContent = 'Сохранить';
   }
@@ -412,8 +431,9 @@ function renderAdminStats(){
 
 function renderFilters(){
   const positions = ['all', ...new Set(ALL_APPS.map(a=>a.position).filter(Boolean))];
-  document.getElementById('filters').innerHTML = positions.map(p=>`
-    <div class="fchip ${ACTIVE_FILTER===p?'active':''}" onclick="setFilter('${p.replace(/'/g,"\\'")}')">${p==='all'?'Все должности':p}</div>
+  window._hrPositions = positions;
+  document.getElementById('filters').innerHTML = positions.map((p,i)=>`
+    <div class="fchip ${ACTIVE_FILTER===p?'active':''}" onclick="setFilter(window._hrPositions[${i}])">${p==='all'?'Все должности':esc(p)}</div>
   `).join('');
 }
 
@@ -426,30 +446,31 @@ function renderTable(){
     document.getElementById('tbody').innerHTML = `<tr><td colspan="7" class="empty">Заявок пока нет</td></tr>`;
     return;
   }
+  window._hrRows = rows;
   document.getElementById('tbody').innerHTML = rows.map((a,i)=>`
-    <tr class="row-detail" onclick="toggleDetail(${i}, '${a.id}')">
-      <td><b>${a.name||'—'}</b></td>
-      <td>${a.position||'—'}</td>
-      <td>${a.age||'—'}</td>
-      <td>${a.experience||'—'}</td>
+    <tr class="row-detail" onclick="toggleDetail(${i}, window._hrRows[${i}].id)">
+      <td><b>${esc(a.name||'—')}</b></td>
+      <td>${esc(a.position||'—')}</td>
+      <td>${esc(a.age||'—')}</td>
+      <td>${esc(a.experience||'—')}</td>
       <td onclick="event.stopPropagation()">
-        <div style="font-size:13px;font-weight:600;margin-bottom:3px">${a.status||'Новая'}</div>
-        ${a.processedBy ? `<div style="font-size:11px;color:var(--muted);margin-bottom:4px">${a.processedBy}${a.statusChangedAt ? ', ' + new Date(a.statusChangedAt).toLocaleString('ru-RU',{day:'2-digit',month:'2-digit',hour:'2-digit',minute:'2-digit'}) : ''}</div>` : ''}
-        ${a.status === 'Собеседование назначено' && a.interviewDate ? `<div style="font-size:11px;color:var(--accent);font-weight:600;margin-bottom:4px">${a.interviewDate}${a.interviewTime ? ', ' + a.interviewTime : ''}</div>` : ''}
-        <button onclick="hrOpenStatusEditor('${a.id}')" style="font-size:11px;padding:5px 10px;border-radius:7px;border:1.5px solid var(--line);background:#fff;cursor:pointer;color:var(--accent);font-weight:600;font-family:inherit">Изменить</button>
+        <div style="font-size:13px;font-weight:600;margin-bottom:3px">${esc(a.status||'Новая')}</div>
+        ${a.processedBy ? `<div style="font-size:11px;color:var(--muted);margin-bottom:4px">${esc(a.processedBy)}${a.statusChangedAt ? ', ' + new Date(a.statusChangedAt).toLocaleString('ru-RU',{day:'2-digit',month:'2-digit',hour:'2-digit',minute:'2-digit'}) : ''}</div>` : ''}
+        ${a.status === 'Собеседование назначено' && a.interviewDate ? `<div style="font-size:11px;color:var(--accent);font-weight:600;margin-bottom:4px">${esc(a.interviewDate)}${a.interviewTime ? ', ' + esc(a.interviewTime) : ''}</div>` : ''}
+        <button onclick="hrOpenStatusEditor(window._hrRows[${i}].id)" style="font-size:11px;padding:5px 10px;border-radius:7px;border:1.5px solid var(--line);background:#fff;cursor:pointer;color:var(--accent);font-weight:600;font-family:inherit">Изменить</button>
       </td>
-      <td>${a.processedBy || '—'}</td>
+      <td>${esc(a.processedBy || '—')}</td>
       <td>${a.timestamp ? new Date(a.timestamp).toLocaleDateString('ru-RU') : '—'}</td>
     </tr>
     <tr class="detail-row" id="detail-${i}">
       <td colspan="7">
         <div class="detail-grid">
-          <div><div class="k">Телефон</div><div class="v">${a.phone||'—'}</div></div>
-          <div><div class="k">Причина увольнения с прошлого места</div><div class="v">${a.leaveReason||'—'}</div></div>
-          <div><div class="k">Почему хочет работать у нас</div><div class="v">${a.whyWorkHere||'—'}</div></div>
-          <div><div class="k">Удобный график</div><div class="v">${a.schedule||'—'}</div></div>
-          <div><div class="k">Предпочитаемый филиал</div><div class="v">${a.preferredBranch||'—'}</div></div>
-          <div><div class="k">Откуда узнал(а) о вакансии</div><div class="v">${a.howFound||'—'}</div></div>
+          <div><div class="k">Телефон</div><div class="v">${esc(a.phone||'—')}</div></div>
+          <div><div class="k">Причина увольнения с прошлого места</div><div class="v">${esc(a.leaveReason||'—')}</div></div>
+          <div><div class="k">Почему хочет работать у нас</div><div class="v">${esc(a.whyWorkHere||'—')}</div></div>
+          <div><div class="k">Удобный график</div><div class="v">${esc(a.schedule||'—')}</div></div>
+          <div><div class="k">Предпочитаемый филиал</div><div class="v">${esc(a.preferredBranch||'—')}</div></div>
+          <div><div class="k">Откуда узнал(а) о вакансии</div><div class="v">${esc(a.howFound||'—')}</div></div>
         </div>
       </td>
     </tr>
